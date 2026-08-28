@@ -38,10 +38,9 @@ type VerificationResult = {
 
 type DeleteResult = {
 	success: boolean;
-	responseCode?: number;
-	message?: string;
-	content?: unknown;
-	httpStatus?: number;
+	responseCode: number;
+	message: string;
+	httpStatus: number;
 };
 
 
@@ -385,7 +384,6 @@ async function purgeSubmission(
 	result: VerificationResult
 ) {
 
-	// Extra defensive check before destructive action.
 	if (
 		!result.folderFound ||
 		!result.pdfFound ||
@@ -412,7 +410,7 @@ async function purgeSubmission(
 	);
 
 
-	const deleteResult =
+	const deleteResult: DeleteResult =
 		await step.do(
 			`Delete Jotform submission ${submissionId}`,
 			async () => {
@@ -428,7 +426,7 @@ async function purgeSubmission(
 	if (!deleteResult.success) {
 
 		console.error(
-			`JOTFORM DELETE FAILED — submission ${submissionId} remains in Jotform.`
+			`JOTFORM DELETE FAILED — submission ${submissionId} was not confirmed deleted.`
 		);
 
 
@@ -480,57 +478,51 @@ async function deleteJotformSubmission(
 		await response.text();
 
 
-	let data: any =
-		null;
+	let responseCode =
+		0;
+
+	let message =
+		"";
 
 
 	try {
-		data =
+
+		const data =
 			text
 				? JSON.parse(text)
 				: null;
+
+
+		responseCode =
+			Number(
+				data?.responseCode || 0
+			);
+
+
+		message =
+			String(
+				data?.message || ""
+			);
+
 	} catch {
-		data = null;
+
+		message =
+			text || `HTTP ${response.status}`;
 	}
-
-
-	if (!response.ok) {
-
-		return {
-			success: false,
-			httpStatus: response.status,
-			responseCode:
-				data?.responseCode,
-			message:
-				data?.message ||
-				text ||
-				`HTTP ${response.status}`,
-			content:
-				data?.content
-		};
-	}
-
-
-	const responseCode =
-		Number(
-			data?.responseCode
-		);
 
 
 	const success =
+		response.ok &&
 		responseCode === 200 &&
-		data?.message === "success";
+		message.toLowerCase() === "success";
 
 
 	return {
 		success,
-		httpStatus: response.status,
-		responseCode:
-			data?.responseCode,
-		message:
-			data?.message,
-		content:
-			data?.content
+		httpStatus:
+			response.status,
+		responseCode,
+		message
 	};
 }
 
