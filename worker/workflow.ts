@@ -8,6 +8,19 @@ import type {
 } from "cloudflare:workers";
 
 
+// ================================================================
+// ENVIRONMENT
+// ================================================================
+
+interface WorkflowEnv extends Env {
+	DROPBOX_ACCESS_TOKEN: string;
+}
+
+
+// ================================================================
+// PARAMETERS PASSED FROM JOTFORM WEBHOOK WORKER
+// ================================================================
+
 type Params = {
 	submissionId: string;
 };
@@ -30,7 +43,7 @@ const ROOT_PATH =
 
 
 export class MyWorkflow extends WorkflowEntrypoint<
-	Env,
+	WorkflowEnv,
 	Params
 > {
 
@@ -56,22 +69,7 @@ export class MyWorkflow extends WorkflowEntrypoint<
 
 
 		// ========================================================
-		// RETRY SCHEDULE
-		// ========================================================
-
-		const waits = [
-			"30 seconds",
-			"1 minute",
-			"2 minutes",
-			"5 minutes",
-			"10 minutes",
-			"20 minutes",
-			"30 minutes",
-		];
-
-
-		// ========================================================
-		// FIRST CHECK — IMMEDIATE
+		// IMMEDIATE CHECK
 		// ========================================================
 
 		let result =
@@ -110,78 +108,182 @@ export class MyWorkflow extends WorkflowEntrypoint<
 
 
 		// ========================================================
-		// RETRY LOOP
+		// WAIT 30 SECONDS
 		// ========================================================
 
-		for (
-			let i = 0;
-			i < waits.length;
-			i++
-		) {
+		await step.sleep(
+			"Wait 30 seconds",
+			"30 seconds"
+		);
 
-			const attempt =
-				i + 1;
+		result = await runCheck(
+			step,
+			this.env.DROPBOX_ACCESS_TOKEN,
+			submissionId,
+			1
+		);
 
-			const waitTime =
-				waits[i];
-
-
-			// ----------------------------------------------------
-			// SLEEP DURABLY
-			// ----------------------------------------------------
-
-			await step.sleep(
-				`Wait before Dropbox check ${attempt}`,
-				waitTime
-			);
-
-
-			// ----------------------------------------------------
-			// CHECK DROPBOX AGAIN
-			// ----------------------------------------------------
-
-			result =
-				await step.do(
-					`Dropbox check ${attempt}`,
-					async () => {
-
-						return await verifyDropboxSubmission(
-							this.env.DROPBOX_ACCESS_TOKEN,
-							submissionId
-						);
-					}
-				);
-
-
-			logResult(
+		if (result.safeToPurge) {
+			return safeResult(
 				submissionId,
-				attempt,
+				1,
 				result
 			);
-
-
-			// ----------------------------------------------------
-			// STOP AS SOON AS BOTH FILES EXIST
-			// ----------------------------------------------------
-
-			if (result.safeToPurge) {
-
-				console.log(
-					`SAFE TO PURGE — TEST MODE ONLY — submission ${submissionId}`
-				);
-
-				return {
-					submissionId,
-					status: "safe-to-purge",
-					check: attempt,
-					result
-				};
-			}
 		}
 
 
 		// ========================================================
-		// NEVER DELETE IF VERIFICATION FAILED
+		// WAIT 1 MINUTE
+		// ========================================================
+
+		await step.sleep(
+			"Wait 1 minute",
+			"1 minute"
+		);
+
+		result = await runCheck(
+			step,
+			this.env.DROPBOX_ACCESS_TOKEN,
+			submissionId,
+			2
+		);
+
+		if (result.safeToPurge) {
+			return safeResult(
+				submissionId,
+				2,
+				result
+			);
+		}
+
+
+		// ========================================================
+		// WAIT 2 MINUTES
+		// ========================================================
+
+		await step.sleep(
+			"Wait 2 minutes",
+			"2 minutes"
+		);
+
+		result = await runCheck(
+			step,
+			this.env.DROPBOX_ACCESS_TOKEN,
+			submissionId,
+			3
+		);
+
+		if (result.safeToPurge) {
+			return safeResult(
+				submissionId,
+				3,
+				result
+			);
+		}
+
+
+		// ========================================================
+		// WAIT 5 MINUTES
+		// ========================================================
+
+		await step.sleep(
+			"Wait 5 minutes",
+			"5 minutes"
+		);
+
+		result = await runCheck(
+			step,
+			this.env.DROPBOX_ACCESS_TOKEN,
+			submissionId,
+			4
+		);
+
+		if (result.safeToPurge) {
+			return safeResult(
+				submissionId,
+				4,
+				result
+			);
+		}
+
+
+		// ========================================================
+		// WAIT 10 MINUTES
+		// ========================================================
+
+		await step.sleep(
+			"Wait 10 minutes",
+			"10 minutes"
+		);
+
+		result = await runCheck(
+			step,
+			this.env.DROPBOX_ACCESS_TOKEN,
+			submissionId,
+			5
+		);
+
+		if (result.safeToPurge) {
+			return safeResult(
+				submissionId,
+				5,
+				result
+			);
+		}
+
+
+		// ========================================================
+		// WAIT 20 MINUTES
+		// ========================================================
+
+		await step.sleep(
+			"Wait 20 minutes",
+			"20 minutes"
+		);
+
+		result = await runCheck(
+			step,
+			this.env.DROPBOX_ACCESS_TOKEN,
+			submissionId,
+			6
+		);
+
+		if (result.safeToPurge) {
+			return safeResult(
+				submissionId,
+				6,
+				result
+			);
+		}
+
+
+		// ========================================================
+		// WAIT 30 MINUTES
+		// ========================================================
+
+		await step.sleep(
+			"Wait 30 minutes final",
+			"30 minutes"
+		);
+
+		result = await runCheck(
+			step,
+			this.env.DROPBOX_ACCESS_TOKEN,
+			submissionId,
+			7
+		);
+
+		if (result.safeToPurge) {
+			return safeResult(
+				submissionId,
+				7,
+				result
+			);
+		}
+
+
+		// ========================================================
+		// GIVE UP SAFELY
 		// ========================================================
 
 		console.log(
@@ -199,18 +301,72 @@ export class MyWorkflow extends WorkflowEntrypoint<
 
 
 // ================================================================
-// VERIFY A JOTFORM SUBMISSION IN DROPBOX
+// RUN ONE DROPBOX CHECK
+// ================================================================
+
+async function runCheck(
+	step: WorkflowStep,
+	accessToken: string,
+	submissionId: string,
+	attempt: number
+): Promise<VerificationResult> {
+
+	const result =
+		await step.do(
+			`Dropbox check ${attempt}`,
+			async () => {
+
+				return await verifyDropboxSubmission(
+					accessToken,
+					submissionId
+				);
+			}
+		);
+
+
+	logResult(
+		submissionId,
+		attempt,
+		result
+	);
+
+
+	return result;
+}
+
+
+// ================================================================
+// SAFE RESULT
+// ================================================================
+
+function safeResult(
+	submissionId: string,
+	check: number,
+	result: VerificationResult
+) {
+
+	console.log(
+		`SAFE TO PURGE — TEST MODE ONLY — submission ${submissionId}`
+	);
+
+
+	return {
+		submissionId,
+		status: "safe-to-purge",
+		check,
+		result
+	};
+}
+
+
+// ================================================================
+// VERIFY DROPBOX SUBMISSION
 // ================================================================
 
 async function verifyDropboxSubmission(
 	accessToken: string,
 	submissionId: string
 ): Promise<VerificationResult> {
-
-
-	// ============================================================
-	// SEARCH FOR THE SUBMISSION FOLDER
-	// ============================================================
 
 	const searchResponse =
 		await fetch(
@@ -282,10 +438,6 @@ async function verifyDropboxSubmission(
 	}
 
 
-	// ============================================================
-	// FOLDER DOES NOT EXIST YET
-	// ============================================================
-
 	if (!folderPath) {
 
 		return {
@@ -296,10 +448,6 @@ async function verifyDropboxSubmission(
 		};
 	}
 
-
-	// ============================================================
-	// LIST FILES INSIDE THE SUBMISSION FOLDER
-	// ============================================================
 
 	const listResponse =
 		await fetch(
@@ -338,12 +486,9 @@ async function verifyDropboxSubmission(
 		await listResponse.json();
 
 
-	// ============================================================
-	// EXPECTED FILE TYPES
-	// ============================================================
-
 	const pdfName =
 		`${submissionId}.pdf`;
+
 
 	const videoExtensions = [
 		".mov",
@@ -361,10 +506,6 @@ async function verifyDropboxSubmission(
 	let videoFound =
 		false;
 
-
-	// ============================================================
-	// VERIFY BOTH FILES EXIST AND ARE NONZERO SIZE
-	// ============================================================
 
 	for (
 		const entry
@@ -429,7 +570,7 @@ async function verifyDropboxSubmission(
 
 
 // ================================================================
-// LOG CHECK RESULT
+// LOG RESULT
 // ================================================================
 
 function logResult(
