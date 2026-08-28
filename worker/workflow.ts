@@ -14,6 +14,7 @@ import type {
 
 interface WorkflowEnv extends Env {
 	DROPBOX_ACCESS_TOKEN: string;
+	JOTFORM_API_KEY: string;
 }
 
 
@@ -35,12 +36,32 @@ type VerificationResult = {
 };
 
 
+type DeleteResult = {
+	success: boolean;
+	responseCode?: number;
+	message?: string;
+	content?: unknown;
+	httpStatus?: number;
+};
+
+
+// ================================================================
+// CONSTANTS
+// ================================================================
+
 const DROPBOX_API =
 	"https://api.dropboxapi.com/2";
+
+const JOTFORM_API =
+	"https://api.jotform.com";
 
 const ROOT_PATH =
 	"/Dash Cams/2 Submissions";
 
+
+// ================================================================
+// WORKFLOW
+// ================================================================
 
 export class MyWorkflow extends WorkflowEntrypoint<
 	WorkflowEnv,
@@ -94,16 +115,13 @@ export class MyWorkflow extends WorkflowEntrypoint<
 
 		if (result.safeToPurge) {
 
-			console.log(
-				`SAFE TO PURGE — TEST MODE ONLY — submission ${submissionId}`
-			);
-
-			return {
+			return await purgeSubmission(
+				step,
+				this.env.JOTFORM_API_KEY,
 				submissionId,
-				status: "safe-to-purge",
-				check: 0,
+				0,
 				result
-			};
+			);
 		}
 
 
@@ -124,7 +142,9 @@ export class MyWorkflow extends WorkflowEntrypoint<
 		);
 
 		if (result.safeToPurge) {
-			return safeResult(
+			return await purgeSubmission(
+				step,
+				this.env.JOTFORM_API_KEY,
 				submissionId,
 				1,
 				result
@@ -149,7 +169,9 @@ export class MyWorkflow extends WorkflowEntrypoint<
 		);
 
 		if (result.safeToPurge) {
-			return safeResult(
+			return await purgeSubmission(
+				step,
+				this.env.JOTFORM_API_KEY,
 				submissionId,
 				2,
 				result
@@ -174,7 +196,9 @@ export class MyWorkflow extends WorkflowEntrypoint<
 		);
 
 		if (result.safeToPurge) {
-			return safeResult(
+			return await purgeSubmission(
+				step,
+				this.env.JOTFORM_API_KEY,
 				submissionId,
 				3,
 				result
@@ -199,7 +223,9 @@ export class MyWorkflow extends WorkflowEntrypoint<
 		);
 
 		if (result.safeToPurge) {
-			return safeResult(
+			return await purgeSubmission(
+				step,
+				this.env.JOTFORM_API_KEY,
 				submissionId,
 				4,
 				result
@@ -224,7 +250,9 @@ export class MyWorkflow extends WorkflowEntrypoint<
 		);
 
 		if (result.safeToPurge) {
-			return safeResult(
+			return await purgeSubmission(
+				step,
+				this.env.JOTFORM_API_KEY,
 				submissionId,
 				5,
 				result
@@ -249,7 +277,9 @@ export class MyWorkflow extends WorkflowEntrypoint<
 		);
 
 		if (result.safeToPurge) {
-			return safeResult(
+			return await purgeSubmission(
+				step,
+				this.env.JOTFORM_API_KEY,
 				submissionId,
 				6,
 				result
@@ -274,7 +304,9 @@ export class MyWorkflow extends WorkflowEntrypoint<
 		);
 
 		if (result.safeToPurge) {
-			return safeResult(
+			return await purgeSubmission(
+				step,
+				this.env.JOTFORM_API_KEY,
 				submissionId,
 				7,
 				result
@@ -336,25 +368,169 @@ async function runCheck(
 
 
 // ================================================================
-// SAFE RESULT
+// PURGE JOTFORM SUBMISSION
+//
+// THIS ONLY RUNS AFTER:
+// folderFound = true
+// pdfFound = true
+// videoFound = true
+// safeToPurge = true
 // ================================================================
 
-function safeResult(
+async function purgeSubmission(
+	step: WorkflowStep,
+	apiKey: string,
 	submissionId: string,
 	check: number,
 	result: VerificationResult
 ) {
 
+	// Extra defensive check before destructive action.
+	if (
+		!result.folderFound ||
+		!result.pdfFound ||
+		!result.videoFound ||
+		!result.safeToPurge
+	) {
+
+		console.error(
+			`PURGE BLOCKED — verification was not fully satisfied for submission ${submissionId}`
+		);
+
+
+		return {
+			submissionId,
+			status: "not-safe-to-purge",
+			check,
+			result
+		};
+	}
+
+
 	console.log(
-		`SAFE TO PURGE — TEST MODE ONLY — submission ${submissionId}`
+		`Dropbox verification complete. Beginning Jotform deletion for submission ${submissionId}.`
+	);
+
+
+	const deleteResult =
+		await step.do(
+			`Delete Jotform submission ${submissionId}`,
+			async () => {
+
+				return await deleteJotformSubmission(
+					apiKey,
+					submissionId
+				);
+			}
+		);
+
+
+	if (!deleteResult.success) {
+
+		console.error(
+			`JOTFORM DELETE FAILED — submission ${submissionId} remains in Jotform.`
+		);
+
+
+		throw new Error(
+			`Jotform deletion failed for submission ${submissionId}: ${deleteResult.message || "Unknown error"}`
+		);
+	}
+
+
+	console.log(
+		`JOTFORM SUBMISSION DELETED — ${submissionId}`
 	);
 
 
 	return {
 		submissionId,
-		status: "safe-to-purge",
+		status: "purged",
 		check,
-		result
+		result,
+		jotformDelete: deleteResult
+	};
+}
+
+
+// ================================================================
+// DELETE JOTFORM SUBMISSION
+// ================================================================
+
+async function deleteJotformSubmission(
+	apiKey: string,
+	submissionId: string
+): Promise<DeleteResult> {
+
+	const response =
+		await fetch(
+			`${JOTFORM_API}/submission/${encodeURIComponent(submissionId)}`,
+			{
+				method: "DELETE",
+
+				headers: {
+					APIKEY: apiKey,
+					Accept: "application/json"
+				}
+			}
+		);
+
+
+	const text =
+		await response.text();
+
+
+	let data: any =
+		null;
+
+
+	try {
+		data =
+			text
+				? JSON.parse(text)
+				: null;
+	} catch {
+		data = null;
+	}
+
+
+	if (!response.ok) {
+
+		return {
+			success: false,
+			httpStatus: response.status,
+			responseCode:
+				data?.responseCode,
+			message:
+				data?.message ||
+				text ||
+				`HTTP ${response.status}`,
+			content:
+				data?.content
+		};
+	}
+
+
+	const responseCode =
+		Number(
+			data?.responseCode
+		);
+
+
+	const success =
+		responseCode === 200 &&
+		data?.message === "success";
+
+
+	return {
+		success,
+		httpStatus: response.status,
+		responseCode:
+			data?.responseCode,
+		message:
+			data?.message,
+		content:
+			data?.content
 	};
 }
 
@@ -593,5 +769,9 @@ function logResult(
 
 	console.log(
 		`Video: ${result.videoFound ? "FOUND" : "NOT FOUND"}`
+	);
+
+	console.log(
+		`Safe to purge: ${result.safeToPurge ? "YES" : "NO"}`
 	);
 }
