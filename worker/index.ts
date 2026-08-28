@@ -2,124 +2,291 @@
 export { MyWorkflow } from "./workflow";
 export { WorkflowStatusDO } from "./durable-object";
 
+
 /**
  * Main Worker fetch handler
  *
- * Handles API routes and WebSocket upgrade requests for workflow management:
- * - POST /api/workflow/start - Create new workflow instance
- * - GET /api/workflow/status/:id - Get workflow status
- * - POST /api/workflow/event/:id - Send events to workflow
- * - GET /ws - WebSocket connection for real-time updates
+ * API routes:
+ *
+ * POST /api/workflow/start
+ * Starts a Dropbox verification Workflow.
+ *
+ * Expected JSON:
+ * {
+ *   "submissionId": "6637543001025961942"
+ * }
+ *
+ * GET /api/workflow/status/:id
+ * Returns Cloudflare Workflow instance status.
+ *
+ * GET /ws
+ * Retains the starter template's WebSocket status support.
  */
+
 export default {
-	async fetch(request: Request, env: Env): Promise<Response> {
-		const url = new URL(request.url);
+	async fetch(
+		request: Request,
+		env: Env
+	): Promise<Response> {
 
-		// API: Start a new workflow instance
-		if (url.pathname === "/api/workflow/start" && request.method === "POST") {
-			try {
-				const instance = await env.MY_WORKFLOW.create({
-					params: {
-						timestamp: Date.now(),
-					},
-				});
+		const url =
+			new URL(request.url);
 
-				return Response.json({
-					instanceId: instance.id,
-					message: "Workflow started successfully",
-				});
-			} catch {
-				return Response.json(
-					{ error: "Failed to start workflow" },
-					{ status: 500 },
-				);
-			}
-		}
 
-		// API: Get workflow status
-		if (url.pathname.startsWith("/api/workflow/status/")) {
-			const instanceId = url.pathname.split("/").pop();
-			if (!instanceId) {
-				return Response.json(
-					{ error: "Instance ID required" },
-					{ status: 400 },
-				);
-			}
+		// ============================================================
+		// START WORKFLOW
+		// ============================================================
 
-			try {
-				const instance = await env.MY_WORKFLOW.get(instanceId);
-				const status = await instance.status();
-				return Response.json(status);
-			} catch {
-				return Response.json(
-					{ error: "Failed to get workflow status" },
-					{ status: 500 },
-				);
-			}
-		}
-
-		// API: Send event to workflow instance
 		if (
-			url.pathname.startsWith("/api/workflow/event/") &&
+			url.pathname === "/api/workflow/start" &&
 			request.method === "POST"
 		) {
-			const instanceId = url.pathname.split("/").pop();
-			if (!instanceId) {
-				return Response.json(
-					{ error: "Instance ID required" },
-					{ status: 400 },
-				);
-			}
 
 			try {
-				const body = (await request.json()) as {
-					approved: boolean;
-					comment?: string;
-				};
-				const instance = await env.MY_WORKFLOW.get(instanceId);
 
-				await instance.sendEvent({
-					type: "user-approval",
-					payload: body,
-				});
+				const body =
+					(await request.json()) as {
+						submissionId?: string;
+					};
+
+
+				const submissionId =
+					body.submissionId?.trim();
+
+
+				if (!submissionId) {
+
+					return Response.json(
+						{
+							error:
+								"submissionId is required"
+						},
+						{
+							status: 400
+						}
+					);
+				}
+
+
+				const instance =
+					await env.MY_WORKFLOW.create({
+						params: {
+							submissionId
+						}
+					});
+
 
 				return Response.json({
-					success: true,
-					message: "Event sent successfully",
+					instanceId:
+						instance.id,
+
+					submissionId,
+
+					message:
+						"Dropbox verification workflow started successfully"
 				});
-			} catch {
+
+			} catch (error) {
+
+				console.error(
+					"Failed to start workflow:",
+					error
+				);
+
+
 				return Response.json(
-					{ error: "Failed to send event" },
-					{ status: 500 },
+					{
+						error:
+							"Failed to start workflow"
+					},
+					{
+						status: 500
+					}
 				);
 			}
 		}
 
-		// WebSocket: Connect to workflow status updates
-		if (url.pathname === "/ws") {
-			const instanceId = url.searchParams.get("instanceId");
+
+		// ============================================================
+		// GET WORKFLOW STATUS
+		// ============================================================
+
+		if (
+			url.pathname.startsWith(
+				"/api/workflow/status/"
+			) &&
+			request.method === "GET"
+		) {
+
+			const instanceId =
+				url.pathname
+					.split("/")
+					.pop();
+
+
 			if (!instanceId) {
-				return new Response("instanceId query parameter required", {
-					status: 400,
-				});
+
+				return Response.json(
+					{
+						error:
+							"Instance ID required"
+					},
+					{
+						status: 400
+					}
+				);
 			}
 
-			const upgradeHeader = request.headers.get("Upgrade");
-			if (upgradeHeader !== "websocket") {
-				return new Response("Expected Upgrade: websocket", { status: 426 });
-			}
 
 			try {
-				const doId = env.WORKFLOW_STATUS.idFromName(instanceId);
-				const stub = env.WORKFLOW_STATUS.get(doId);
-				return stub.fetch(request);
-			} catch {
-				return new Response("Failed to establish WebSocket connection", {
-					status: 500,
-				});
+
+				const instance =
+					await env.MY_WORKFLOW.get(
+						instanceId
+					);
+
+
+				const status =
+					await instance.status();
+
+
+				return Response.json(
+					status
+				);
+
+			} catch (error) {
+
+				console.error(
+					"Failed to get workflow status:",
+					error
+				);
+
+
+				return Response.json(
+					{
+						error:
+							"Failed to get workflow status"
+					},
+					{
+						status: 500
+					}
+				);
 			}
 		}
 
-		return Response.json({ error: "Not Found" }, { status: 404 });
-	},
+
+		// ============================================================
+		// WEBSOCKET STATUS SUPPORT
+		// ============================================================
+
+		if (
+			url.pathname === "/ws"
+		) {
+
+			const instanceId =
+				url.searchParams.get(
+					"instanceId"
+				);
+
+
+			if (!instanceId) {
+
+				return new Response(
+					"instanceId query parameter required",
+					{
+						status: 400
+					}
+				);
+			}
+
+
+			const upgradeHeader =
+				request.headers.get(
+					"Upgrade"
+				);
+
+
+			if (
+				upgradeHeader !==
+				"websocket"
+			) {
+
+				return new Response(
+					"Expected Upgrade: websocket",
+					{
+						status: 426
+					}
+				);
+			}
+
+
+			try {
+
+				const doId =
+					env.WORKFLOW_STATUS.idFromName(
+						instanceId
+					);
+
+
+				const stub =
+					env.WORKFLOW_STATUS.get(
+						doId
+					);
+
+
+				return stub.fetch(
+					request
+				);
+
+			} catch (error) {
+
+				console.error(
+					"WebSocket connection failed:",
+					error
+				);
+
+
+				return new Response(
+					"Failed to establish WebSocket connection",
+					{
+						status: 500
+					}
+				);
+			}
+		}
+
+
+		// ============================================================
+		// BASIC STATUS PAGE
+		// ============================================================
+
+		if (
+			url.pathname === "/" &&
+			request.method === "GET"
+		) {
+
+			return Response.json({
+				service:
+					"BDJ Dropbox Verifier",
+
+				status:
+					"running",
+
+				mode:
+					"TEST MODE - NO JOTFORM DELETION"
+			});
+		}
+
+
+		return Response.json(
+			{
+				error:
+					"Not Found"
+			},
+			{
+				status: 404
+			}
+		);
+	}
+
 } satisfies ExportedHandler<Env>;
